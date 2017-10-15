@@ -16,23 +16,10 @@
  */
 package org.apache.nifi.processors.standard;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
-
+import com.github.junrar.SinglePassArchive;
+import com.github.junrar.exception.RarException;
+import com.github.junrar.impl.UnboundedInputStreamVolumeManager;
+import com.github.junrar.rarfile.FileHeader;
 import org.apache.commons.compress.archivers.ArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
@@ -72,11 +59,21 @@ import org.apache.nifi.util.FlowFileUnpackagerV1;
 import org.apache.nifi.util.FlowFileUnpackagerV2;
 import org.apache.nifi.util.FlowFileUnpackagerV3;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
+
 @EventDriven
 @SideEffectFree
 @SupportsBatching
 @InputRequirement(Requirement.INPUT_REQUIRED)
-@Tags({"Unpack", "un-merge", "tar", "zip", "archive", "flowfile-stream", "flowfile-stream-v3"})
+@Tags({"Unpack", "un-merge", "tar", "zip", "archive", "flowfile-stream", "flowfile-stream-v3, rar"})
 @CapabilityDescription("Unpacks the content of FlowFiles that have been packaged with one of several different Packaging Formats, emitting one to many "
         + "FlowFiles for each input FlowFile")
 @ReadsAttribute(attribute = "mime.type", description = "If the <Packaging Format> property is set to use mime.type attribute, this attribute is used "
@@ -86,15 +83,15 @@ import org.apache.nifi.util.FlowFileUnpackagerV3;
         + "the FlowFile will be routed to 'failure'. Otherwise, if the attribute's value is not one of those mentioned above, the FlowFile will be "
         + "routed to 'success' without being unpacked. Use the File Filter property only extract files matching a specific regular expression.")
 @WritesAttributes({
-    @WritesAttribute(attribute = "mime.type", description = "If the FlowFile is successfully unpacked, its MIME Type is no longer known, so the mime.type "
-            + "attribute is set to application/octet-stream."),
-    @WritesAttribute(attribute = "fragment.identifier", description = "All unpacked FlowFiles produced from the same parent FlowFile will have the same randomly generated "
-            + "UUID added for this attribute"),
-    @WritesAttribute(attribute = "fragment.index", description = "A one-up number that indicates the ordering of the unpacked FlowFiles that were created from a single "
-            + "parent FlowFile"),
-    @WritesAttribute(attribute = "fragment.count", description = "The number of unpacked FlowFiles generated from the parent FlowFile"),
-    @WritesAttribute(attribute = "segment.original.filename ", description = "The filename of the parent FlowFile. Extensions of .tar, .zip or .pkg are removed because "
-            + "the MergeContent processor automatically adds those extensions if it is used to rebuild the original FlowFile")})
+        @WritesAttribute(attribute = "mime.type", description = "If the FlowFile is successfully unpacked, its MIME Type is no longer known, so the mime.type "
+                + "attribute is set to application/octet-stream."),
+        @WritesAttribute(attribute = "fragment.identifier", description = "All unpacked FlowFiles produced from the same parent FlowFile will have the same randomly generated "
+                + "UUID added for this attribute"),
+        @WritesAttribute(attribute = "fragment.index", description = "A one-up number that indicates the ordering of the unpacked FlowFiles that were created from a single "
+                + "parent FlowFile"),
+        @WritesAttribute(attribute = "fragment.count", description = "The number of unpacked FlowFiles generated from the parent FlowFile"),
+        @WritesAttribute(attribute = "segment.original.filename ", description = "The filename of the parent FlowFile. Extensions of .tar, .zip or .pkg are removed because "
+                + "the MergeContent processor automatically adds those extensions if it is used to rebuild the original FlowFile")})
 @SeeAlso(MergeContent.class)
 public class UnpackContent extends AbstractProcessor {
     // attribute keys
@@ -109,6 +106,7 @@ public class UnpackContent extends AbstractProcessor {
     public static final String FLOWFILE_STREAM_FORMAT_V3_NAME = "flowfile-stream-v3";
     public static final String FLOWFILE_STREAM_FORMAT_V2_NAME = "flowfile-stream-v2";
     public static final String FLOWFILE_TAR_FORMAT_NAME = "flowfile-tar-v1";
+    public static final String RAR_FORMAT_NAME = "rar";
 
     public static final String OCTET_STREAM = "application/octet-stream";
 
@@ -118,7 +116,8 @@ public class UnpackContent extends AbstractProcessor {
             .required(true)
             .allowableValues(PackageFormat.AUTO_DETECT_FORMAT.toString(), PackageFormat.TAR_FORMAT.toString(),
                     PackageFormat.ZIP_FORMAT.toString(), PackageFormat.FLOWFILE_STREAM_FORMAT_V3.toString(),
-                    PackageFormat.FLOWFILE_STREAM_FORMAT_V2.toString(), PackageFormat.FLOWFILE_TAR_FORMAT.toString())
+                    PackageFormat.FLOWFILE_STREAM_FORMAT_V2.toString(), PackageFormat.FLOWFILE_TAR_FORMAT.toString(),
+                    PackageFormat.RAR_FORMAT.toString())
             .defaultValue(PackageFormat.AUTO_DETECT_FORMAT.toString())
             .build();
 
@@ -150,6 +149,7 @@ public class UnpackContent extends AbstractProcessor {
 
     private Unpacker tarUnpacker;
     private Unpacker zipUnpacker;
+    private Unpacker rarUnpacker;
 
     @Override
     protected void init(final ProcessorInitializationContext context) {
@@ -186,6 +186,7 @@ public class UnpackContent extends AbstractProcessor {
             fileFilter = Pattern.compile(context.getProperty(FILE_FILTER).getValue());
             tarUnpacker = new TarUnpacker(fileFilter);
             zipUnpacker = new ZipUnpacker(fileFilter);
+            rarUnpacker = new RarUnpacker(fileFilter);
         }
     }
 
@@ -207,7 +208,7 @@ public class UnpackContent extends AbstractProcessor {
                 return;
             }
 
-            for (PackageFormat format: PackageFormat.values()) {
+            for (PackageFormat format : PackageFormat.values()) {
                 if (mimeType.toLowerCase().equals(format.getMimeType())) {
                     packagingFormat = format;
                 }
@@ -223,31 +224,35 @@ public class UnpackContent extends AbstractProcessor {
         final Unpacker unpacker;
         final boolean addFragmentAttrs;
         switch (packagingFormat) {
-        case TAR_FORMAT:
-        case X_TAR_FORMAT:
-            unpacker = tarUnpacker;
-            addFragmentAttrs = true;
-            break;
-        case ZIP_FORMAT:
-            unpacker = zipUnpacker;
-            addFragmentAttrs = true;
-            break;
-        case FLOWFILE_STREAM_FORMAT_V2:
-            unpacker = new FlowFileStreamUnpacker(new FlowFileUnpackagerV2());
-            addFragmentAttrs = false;
-            break;
-        case FLOWFILE_STREAM_FORMAT_V3:
-            unpacker = new FlowFileStreamUnpacker(new FlowFileUnpackagerV3());
-            addFragmentAttrs = false;
-            break;
-        case FLOWFILE_TAR_FORMAT:
-            unpacker = new FlowFileStreamUnpacker(new FlowFileUnpackagerV1());
-            addFragmentAttrs = false;
-            break;
-        case AUTO_DETECT_FORMAT:
-        default:
-            // The format of the unpacker should be known before initialization
-            throw new ProcessException(packagingFormat + " is not a valid packaging format");
+            case TAR_FORMAT:
+            case X_TAR_FORMAT:
+                unpacker = tarUnpacker;
+                addFragmentAttrs = true;
+                break;
+            case ZIP_FORMAT:
+                unpacker = zipUnpacker;
+                addFragmentAttrs = true;
+                break;
+            case FLOWFILE_STREAM_FORMAT_V2:
+                unpacker = new FlowFileStreamUnpacker(new FlowFileUnpackagerV2());
+                addFragmentAttrs = false;
+                break;
+            case FLOWFILE_STREAM_FORMAT_V3:
+                unpacker = new FlowFileStreamUnpacker(new FlowFileUnpackagerV3());
+                addFragmentAttrs = false;
+                break;
+            case FLOWFILE_TAR_FORMAT:
+                unpacker = new FlowFileStreamUnpacker(new FlowFileUnpackagerV1());
+                addFragmentAttrs = false;
+                break;
+            case RAR_FORMAT:
+                unpacker = rarUnpacker;
+                addFragmentAttrs = true;
+                break;
+            case AUTO_DETECT_FORMAT:
+            default:
+                // The format of the unpacker should be known before initialization
+                throw new ProcessException(packagingFormat + " is not a valid packaging format");
         }
 
         final List<FlowFile> unpacked = new ArrayList<>();
@@ -278,7 +283,10 @@ public class UnpackContent extends AbstractProcessor {
     private static abstract class Unpacker {
         private Pattern fileFilter = null;
 
-        public Unpacker() {};
+        public Unpacker() {
+        }
+
+        ;
 
         public Unpacker(Pattern fileFilter) {
             this.fileFilter = fileFilter;
@@ -455,6 +463,62 @@ public class UnpackContent extends AbstractProcessor {
         }
     }
 
+    private static class RarUnpacker extends Unpacker {
+
+        public RarUnpacker(Pattern fileFilter) {
+            super(fileFilter);
+        }
+
+        @Override
+        void unpack(ProcessSession session, FlowFile source, List<FlowFile> unpacked) {
+            final String fragmentId = UUID.randomUUID().toString();
+            session.read(source, new InputStreamCallback() {
+                @Override
+                public void process(final InputStream in) throws IOException {
+                    int fragmentCount = 0;
+                    try (final SinglePassArchive a = new SinglePassArchive(new UnboundedInputStreamVolumeManager(in))) {
+                        FileHeader fh;
+                        while (((fh = a.readHeader()) != null)) {
+
+                            final InputStream rarIn = a.getInputStream(fh);
+                            FlowFile unpackedFile = session.create(source);
+
+                            final File file = new File(fh.getFileNameString());
+                            final String parentDirectory = (file.getParent() == null) ? "/" : file.getParent();
+                            final Path absPath = file.toPath().toAbsolutePath();
+                            final String absPathString = absPath.getParent().toString() + "/";
+
+                            try {
+                                final Map<String, String> attributes = new HashMap<>();
+
+                                attributes.put(CoreAttributes.FILENAME.key(), file.getName());
+                                attributes.put(CoreAttributes.PATH.key(), parentDirectory);
+                                attributes.put(CoreAttributes.ABSOLUTE_PATH.key(), absPathString);
+                                attributes.put(CoreAttributes.MIME_TYPE.key(), OCTET_STREAM);
+
+                                attributes.put(FRAGMENT_ID, fragmentId);
+                                attributes.put(FRAGMENT_INDEX, String.valueOf(++fragmentCount));
+
+                                unpackedFile = session.putAllAttributes(unpackedFile, attributes);
+                                unpackedFile = session.write(unpackedFile, new OutputStreamCallback() {
+                                    @Override
+                                    public void process(final OutputStream out) throws IOException {
+                                        StreamUtils.copy(rarIn, out);
+                                    }
+                                });
+                            } finally {
+                                unpacked.add(unpackedFile);
+                                rarIn.close();
+                            }
+                        }
+                    } catch (RarException e) {
+                        throw new ProcessException(e);
+                    }
+                }
+            });
+        }
+    }
+
     private static void mapAttributes(final Map<String, String> attributes, final String oldKey, final String newKey) {
         if (!attributes.containsKey(newKey) && attributes.containsKey(oldKey)) {
             attributes.put(newKey, attributes.get(oldKey));
@@ -497,7 +561,8 @@ public class UnpackContent extends AbstractProcessor {
         ZIP_FORMAT(ZIP_FORMAT_NAME, "application/zip"),
         FLOWFILE_STREAM_FORMAT_V3(FLOWFILE_STREAM_FORMAT_V3_NAME, "application/flowfile-v3"),
         FLOWFILE_STREAM_FORMAT_V2(FLOWFILE_STREAM_FORMAT_V2_NAME, "application/flowfile-v2"),
-        FLOWFILE_TAR_FORMAT(FLOWFILE_TAR_FORMAT_NAME, "application/flowfile-v1");
+        FLOWFILE_TAR_FORMAT(FLOWFILE_TAR_FORMAT_NAME, "application/flowfile-v1"),
+        RAR_FORMAT(RAR_FORMAT_NAME, "application/rar");
 
 
         private final String textValue;
@@ -512,7 +577,8 @@ public class UnpackContent extends AbstractProcessor {
             this.textValue = textValue;
         }
 
-        @Override public String toString() {
+        @Override
+        public String toString() {
             return textValue;
         }
 
@@ -522,18 +588,20 @@ public class UnpackContent extends AbstractProcessor {
 
         public static PackageFormat getFormat(String textValue) {
             switch (textValue) {
-            case AUTO_DETECT_FORMAT_NAME:
-                return AUTO_DETECT_FORMAT;
-            case TAR_FORMAT_NAME:
-                return TAR_FORMAT;
-            case ZIP_FORMAT_NAME:
-                return ZIP_FORMAT;
-            case FLOWFILE_STREAM_FORMAT_V3_NAME:
-                return FLOWFILE_STREAM_FORMAT_V3;
-            case FLOWFILE_STREAM_FORMAT_V2_NAME:
-                return FLOWFILE_STREAM_FORMAT_V2;
-            case FLOWFILE_TAR_FORMAT_NAME:
-                return FLOWFILE_TAR_FORMAT;
+                case AUTO_DETECT_FORMAT_NAME:
+                    return AUTO_DETECT_FORMAT;
+                case TAR_FORMAT_NAME:
+                    return TAR_FORMAT;
+                case ZIP_FORMAT_NAME:
+                    return ZIP_FORMAT;
+                case FLOWFILE_STREAM_FORMAT_V3_NAME:
+                    return FLOWFILE_STREAM_FORMAT_V3;
+                case FLOWFILE_STREAM_FORMAT_V2_NAME:
+                    return FLOWFILE_STREAM_FORMAT_V2;
+                case FLOWFILE_TAR_FORMAT_NAME:
+                    return FLOWFILE_TAR_FORMAT;
+                case RAR_FORMAT_NAME:
+                    return RAR_FORMAT;
             }
             return null;
         }

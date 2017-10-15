@@ -219,6 +219,32 @@ public class TestUnpackContent {
     }
 
     @Test
+    public void testRar() throws IOException {
+        final TestRunner unpackRunner = TestRunners.newTestRunner(new UnpackContent());
+        unpackRunner.setProperty(UnpackContent.PACKAGING_FORMAT, UnpackContent.PackageFormat.RAR_FORMAT.toString());
+        unpackRunner.enqueue(dataPath.resolve("data.rar"));
+        unpackRunner.enqueue(dataPath.resolve("data.rar"));
+        unpackRunner.run(2);
+
+
+        unpackRunner.assertTransferCount(UnpackContent.REL_SUCCESS, 4);
+        unpackRunner.assertTransferCount(UnpackContent.REL_ORIGINAL, 2);
+        unpackRunner.getFlowFilesForRelationship(UnpackContent.REL_ORIGINAL).get(0).assertAttributeEquals(FRAGMENT_COUNT, "2");
+        unpackRunner.getFlowFilesForRelationship(UnpackContent.REL_ORIGINAL).get(1).assertAttributeEquals(FRAGMENT_COUNT, "2");
+        unpackRunner.assertTransferCount(UnpackContent.REL_FAILURE, 0);
+
+        final List<MockFlowFile> unpacked = unpackRunner.getFlowFilesForRelationship(UnpackContent.REL_SUCCESS);
+        for (final MockFlowFile flowFile : unpacked) {
+            final String filename = flowFile.getAttribute(CoreAttributes.FILENAME.key());
+            final String folder = flowFile.getAttribute(CoreAttributes.PATH.key());
+            final Path path = dataPath.resolve(folder).resolve(filename);
+            assertTrue(Files.exists(path));
+
+            flowFile.assertContentEquals(path.toFile());
+        }
+    }
+
+    @Test
     public void testFlowFileStreamV3() throws IOException {
         final TestRunner runner = TestRunners.newTestRunner(new UnpackContent());
         runner.setProperty(UnpackContent.PACKAGING_FORMAT, UnpackContent.PackageFormat.FLOWFILE_STREAM_FORMAT_V3.toString());
