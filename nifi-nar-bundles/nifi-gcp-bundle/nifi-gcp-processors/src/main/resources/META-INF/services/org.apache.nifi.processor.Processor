@@ -16,3 +16,4 @@ org.apache.nifi.processors.gcp.storage.PutGCSObject
 org.apache.nifi.processors.gcp.storage.FetchGCSObject
 org.apache.nifi.processors.gcp.storage.DeleteGCSObject
 org.apache.nifi.processors.gcp.storage.ListGCSBucket
+org.apache.nifi.processors.gcp.dataflow.CreateGCDataflowJobFromTeplate
