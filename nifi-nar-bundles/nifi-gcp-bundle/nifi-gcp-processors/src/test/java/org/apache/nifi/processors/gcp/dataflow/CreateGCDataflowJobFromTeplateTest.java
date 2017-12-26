@@ -34,19 +34,13 @@ public class CreateGCDataflowJobFromTeplateTest {
 
     private LaunchTemplateResponse launchTemplateRequest;
 
-    private Dataflow.Projects.Locations.Jobs.Get getJobRequest;
-
-    private Job initialJob;
-    private Job followingJob;
 
     @Before
     public void init() throws IOException, InitializationException {
         dataflowService = mock(Dataflow.class, Mockito.RETURNS_DEEP_STUBS);
         launch = mock(Dataflow.Projects.Locations.Templates.Launch.class);
         launchTemplateRequest = mock(LaunchTemplateResponse.class);
-        getJobRequest = mock(Dataflow.Projects.Locations.Jobs.Get.class);
-        initialJob = mock(Job.class);
-        followingJob = mock(Job.class);
+
         dataflowServiceProvider = new MockGCPDataflowService();
 
 
@@ -60,65 +54,72 @@ public class CreateGCDataflowJobFromTeplateTest {
         controller.setProperty(CreateGCDataflowJobFromTeplate.JOB_NAME, "name");
         controller.setProperty(CreateGCDataflowJobFromTeplate.GCS_PATH, "path");
 
-
         when(dataflowService.projects().locations().templates().launch(
                 any(String.class),
                 any(String.class),
                 any(LaunchTemplateParameters.class))
         ).thenReturn(launch);
 
-        when(dataflowService.projects().locations().jobs().get(
-                any(String.class),
-                any(String.class),
-                any(String.class))
-        ).thenReturn(getJobRequest);
-
-
-        List<Job> jobs = new ArrayList<>();
-
-
         when(launch.execute()).thenReturn(launchTemplateRequest);
-
+        when(launch.getValidateOnly()).thenReturn(true);
     }
 
     @Test
     public void testJobRunning() throws IOException {
+        Job job_1 = mock(Job.class);
+        Job job_2 = mock(Job.class);
 
-        String[] states = {null, "JOB_STATE_PENDING", "JOB_STATE_RUNNING", "JOB_STATE_DONE"};
 
-        List<Job> jobs = Arrays
-                .stream(states)
-                .map(x -> {
-                    Job mock = mock(Job.class);
-                    when(mock.getCurrentState()).thenReturn(x);
-                    when(mock.getId()).thenReturn("id");
-                    return mock;
-                }).collect(Collectors.toList());
-        when(launchTemplateRequest.getJob()).thenReturn(jobs.remove(0));
-        when(getJobRequest.execute()).thenReturn(jobs.remove(0), jobs.toArray(new Job[jobs.size()]));
-
-        when(initialJob.getCurrentState()).thenReturn(null);
-        when(initialJob.getId()).thenReturn("id");
-
-        when(followingJob.getCurrentState()).thenReturn(
+        Dataflow.Projects.Locations.Jobs.Get getJobRequest_1 = mock(Dataflow.Projects.Locations.Jobs.Get.class);
+        when(dataflowService.projects().locations().jobs().get(
+                any(String.class),
+                any(String.class),
+                eq("id_1"))
+        ).thenReturn(getJobRequest_1);
+        when(getJobRequest_1.execute()).thenReturn(job_1);
+        when(job_1.getCurrentState()).thenReturn(null,
                 "JOB_STATE_PENDING",
                 "JOB_STATE_RUNNING",
                 "JOB_STATE_DONE"
         );
-        when(followingJob.getId()).thenReturn("id");
+        when(job_1.getId()).thenReturn("id_1");
+
+
+        Dataflow.Projects.Locations.Jobs.Get getJobRequest_2 = mock(Dataflow.Projects.Locations.Jobs.Get.class);
+        when(dataflowService.projects().locations().jobs().get(
+                any(String.class),
+                any(String.class),
+                eq("id_2"))
+        ).thenReturn(getJobRequest_2);
+        when(getJobRequest_2.execute()).thenReturn(job_2);
+        when(job_2.getCurrentState()).thenReturn(null,
+                "JOB_STATE_PENDING",
+                "JOB_STATE_RUNNING",
+                "JOB_STATE_CANCELLING",
+                "JOB_STATE_CANCELLED"
+        );
+        when(job_2.getId()).thenReturn("id_2");
 
 
         controller.enqueue("");
-
+        when(launchTemplateRequest.getJob()).thenReturn(job_1);
         controller.run();
 
+        controller.enqueue("");
+        when(launchTemplateRequest.getJob()).thenReturn(job_2);
+        controller.run();
+
+        controller.run();
+        controller.run();
+        controller.run();
+        controller.run();
 
         for (FlowFile flowFile : controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_NOTIFY)) {
             System.out.println(flowFile.getAttribute("attachments"));
         }
     }
 
-    public class MockGCPDataflowService extends AbstractControllerService implements GCPDataflowService{
+    public class MockGCPDataflowService extends AbstractControllerService implements GCPDataflowService {
         @Override
         public Dataflow getDataflowService() {
             return dataflowService;
