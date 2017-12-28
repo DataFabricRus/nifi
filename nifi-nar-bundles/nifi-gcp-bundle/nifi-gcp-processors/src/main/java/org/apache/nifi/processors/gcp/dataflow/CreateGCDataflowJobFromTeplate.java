@@ -93,6 +93,7 @@ public class CreateGCDataflowJobFromTeplate extends AbstractProcessor {
             .build();
 
     public static final String JOB_ID_ATTR = "job.id";
+    public static final String JOB_STATE_ATTR = "job.state";
     public static final String JOB_NAME_ATTR = "job.name";
     private static final String JOB_VALIDATE_ATTR = "job.validate";
     private static final String JOB_TEMPLATE_PATH_ATTR = "job.template.path";
@@ -192,6 +193,7 @@ public class CreateGCDataflowJobFromTeplate extends AbstractProcessor {
             ProcessSession session,
             FlowFile flowFile
     ) throws IOException {
+
         Map<String, String> parameters = new HashMap<>();
         for (final Map.Entry<PropertyDescriptor, String> entry : context.getProperties().entrySet()) {
             if (entry.getKey().isDynamic()) {
@@ -368,6 +370,8 @@ public class CreateGCDataflowJobFromTeplate extends AbstractProcessor {
             session.transfer(flowFile, REL_INPROCESS);
             return;
         }
+
+        session.putAttribute(flowFile, JOB_STATE_ATTR, state);
 
         switch (state) {
             case "JOB_STATE_RUNNING":
