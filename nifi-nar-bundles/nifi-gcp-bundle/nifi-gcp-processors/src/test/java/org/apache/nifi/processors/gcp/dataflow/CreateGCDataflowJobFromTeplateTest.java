@@ -8,6 +8,7 @@ import org.apache.nifi.controller.AbstractControllerService;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.processors.gcp.dataflow.service.GCPDataflowService;
 import org.apache.nifi.reporting.InitializationException;
+import org.apache.nifi.util.MockFlowFile;
 import org.apache.nifi.util.TestRunner;
 import org.apache.nifi.util.TestRunners;
 import org.junit.Before;
@@ -15,10 +16,7 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import static org.mockito.Mockito.*;
 
@@ -61,7 +59,7 @@ public class CreateGCDataflowJobFromTeplateTest {
         ).thenReturn(launch);
 
         when(launch.execute()).thenReturn(launchTemplateRequest);
-        when(launch.getValidateOnly()).thenReturn(true);
+        //when(launch.getValidateOnly()).thenReturn(true);
     }
 
     @Test
@@ -101,6 +99,10 @@ public class CreateGCDataflowJobFromTeplateTest {
         when(job_2.getId()).thenReturn("id_2");
 
 
+        final List<MockFlowFile> succeeded;
+
+
+        controller.addConnection(CreateGCDataflowJobFromTeplate.REL_INPROCESS);
         controller.enqueue("");
         when(launchTemplateRequest.getJob()).thenReturn(job_1);
         controller.run();
@@ -109,9 +111,17 @@ public class CreateGCDataflowJobFromTeplateTest {
         when(launchTemplateRequest.getJob()).thenReturn(job_2);
         controller.run();
 
+
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
         controller.run();
+
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
         controller.run();
+
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
         controller.run();
+
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
         controller.run();
 
         for (FlowFile flowFile : controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_NOTIFY)) {
@@ -125,4 +135,6 @@ public class CreateGCDataflowJobFromTeplateTest {
             return dataflowService;
         }
     }
+
+
 }
