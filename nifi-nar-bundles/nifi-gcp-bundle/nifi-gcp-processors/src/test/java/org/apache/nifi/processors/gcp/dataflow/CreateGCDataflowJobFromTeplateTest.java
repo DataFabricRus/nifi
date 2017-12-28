@@ -112,20 +112,20 @@ public class CreateGCDataflowJobFromTeplateTest {
         controller.run();
 
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
         controller.run();
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
         controller.run();
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
         controller.run();
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(1));
+        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
         controller.run();
 
-        for (FlowFile flowFile : controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_NOTIFY)) {
-            System.out.println(flowFile.getAttribute("attachments"));
+        for (FlowFile flowFile : controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS)) {
+            System.out.println(flowFile.getAttribute(CreateGCDataflowJobFromTeplate.JOB_STATE_ATTR));
         }
     }
 
