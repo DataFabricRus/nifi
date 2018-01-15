@@ -36,7 +36,7 @@ import java.util.*;
         value = "The value of a User-Defined parameter to be set to job",
         description = "Allows User-Defined parameters to be sent to job as key/value pairs",
         supportsExpressionLanguage = true)
-public class CreateGCDataflowJobFromTeplate extends AbstractProcessor {
+public class LaunchAndGetGCPJob extends AbstractProcessor {
     //TODO: think about the name. It it can be called an Ingress Processor then possibly it would be better to start name from Listen. E.g. ListenGCDJobREST
 
     public static final PropertyDescriptor DATAFLOW_SERVICE = new PropertyDescriptor.Builder()

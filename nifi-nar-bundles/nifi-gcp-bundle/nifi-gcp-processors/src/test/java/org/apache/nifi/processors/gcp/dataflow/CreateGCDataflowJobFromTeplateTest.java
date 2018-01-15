@@ -42,15 +42,15 @@ public class CreateGCDataflowJobFromTeplateTest {
         dataflowServiceProvider = new MockGCPDataflowService();
 
 
-        controller = TestRunners.newTestRunner(CreateGCDataflowJobFromTeplate.class);
+        controller = TestRunners.newTestRunner(LaunchAndGetGCPJob.class);
 
         controller.addControllerService("service", dataflowServiceProvider);
         controller.enableControllerService(dataflowServiceProvider);
 
-        controller.setProperty(CreateGCDataflowJobFromTeplate.DATAFLOW_SERVICE, "service");
-        controller.setProperty(CreateGCDataflowJobFromTeplate.PROJECT_ID, "project");
-        controller.setProperty(CreateGCDataflowJobFromTeplate.JOB_NAME, "name");
-        controller.setProperty(CreateGCDataflowJobFromTeplate.GCS_PATH, "path");
+        controller.setProperty(LaunchAndGetGCPJob.DATAFLOW_SERVICE, "service");
+        controller.setProperty(LaunchAndGetGCPJob.PROJECT_ID, "project");
+        controller.setProperty(LaunchAndGetGCPJob.JOB_NAME, "name");
+        controller.setProperty(LaunchAndGetGCPJob.GCS_PATH, "path");
 
         when(dataflowService.projects().locations().templates().launch(
                 any(String.class),
@@ -102,7 +102,7 @@ public class CreateGCDataflowJobFromTeplateTest {
         final List<MockFlowFile> succeeded;
 
 
-        controller.addConnection(CreateGCDataflowJobFromTeplate.REL_INPROCESS);
+        controller.addConnection(LaunchAndGetGCPJob.REL_INPROCESS);
         controller.enqueue("");
         when(launchTemplateRequest.getJob()).thenReturn(job_1);
         controller.run();
@@ -112,20 +112,20 @@ public class CreateGCDataflowJobFromTeplateTest {
         controller.run();
 
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
+        controller.enqueue(controller.getFlowFilesForRelationship(LaunchAndGetGCPJob.REL_INPROCESS).get(0));
         controller.run();
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
+        controller.enqueue(controller.getFlowFilesForRelationship(LaunchAndGetGCPJob.REL_INPROCESS).get(0));
         controller.run();
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
+        controller.enqueue(controller.getFlowFilesForRelationship(LaunchAndGetGCPJob.REL_INPROCESS).get(0));
         controller.run();
 
-        controller.enqueue(controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS).get(0));
+        controller.enqueue(controller.getFlowFilesForRelationship(LaunchAndGetGCPJob.REL_INPROCESS).get(0));
         controller.run();
 
-        for (FlowFile flowFile : controller.getFlowFilesForRelationship(CreateGCDataflowJobFromTeplate.REL_INPROCESS)) {
-            System.out.println(flowFile.getAttribute(CreateGCDataflowJobFromTeplate.JOB_STATE_ATTR));
+        for (FlowFile flowFile : controller.getFlowFilesForRelationship(LaunchAndGetGCPJob.REL_INPROCESS)) {
+            System.out.println(flowFile.getAttribute(LaunchAndGetGCPJob.JOB_STATE_ATTR));
         }
     }
 
