@@ -5,6 +5,7 @@ import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.Job;
 import com.google.api.services.dataflow.model.LaunchTemplateParameters;
 import com.google.api.services.dataflow.model.LaunchTemplateResponse;
+import com.google.api.services.dataflow.model.RuntimeEnvironment;
 import com.google.common.collect.ImmutableList;
 import org.apache.nifi.annotation.behavior.DynamicProperty;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
@@ -92,6 +93,39 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
             .defaultValue("europe-west1")
             .build();
 
+    public static final PropertyDescriptor MACHINE_TYPES = new PropertyDescriptor
+            .Builder().name("machine-type")
+            .displayName("Machine type")
+            .description("Enables to specify type of the machine to run the job")
+            .required(true)
+            .allowableValues
+                    (
+                            "n1-standard-1",
+                            "n1-standard-2",
+                            "n1-standard-4",
+                            "n1-standard-8",
+                            "n1-standard-16",
+                            "n1-standard-32",
+                            "n1-standard-64",
+                            "n1-standard-96",
+                            "n1-highmem-2",
+                            "n1-highmem-4",
+                            "n1-highmem-8",
+                            "n1-highmem-16",
+                            "n1-highmem-32",
+                            "n1-highmem-64",
+                            "n1-highmem-96",
+                            "n1-highcpu-2",
+                            "n1-highcpu-4",
+                            "n1-highcpu-8",
+                            "n1-highcpu-16",
+                            "n1-highcpu-32",
+                            "n1-highcpu-64",
+                            "n1-highcpu-96"
+                    )
+            .defaultValue("n1-standard-1")
+            .build();
+
     public static final String JOB_ID_ATTR = "job.id";
     public static final String JOB_STATE_ATTR = "job.state";
     public static final String JOB_NAME_ATTR = "job.name";
@@ -105,6 +139,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
                 .add(DATAFLOW_SERVICE)
                 .add(PROJECT_ID)
                 .add(LOCATION)
+                .add(MACHINE_TYPES)
                 .add(JOB_NAME)
                 .add(GCS_PATH)
                 .add(VALIDATE_ONLY)
@@ -194,6 +229,18 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
             FlowFile flowFile
     ) throws IOException {
 
+        LaunchTemplateParameters launchTemplateParameters = new LaunchTemplateParameters();
+
+        RuntimeEnvironment runtimeEnvironment = new RuntimeEnvironment();
+        runtimeEnvironment.setMachineType(context.getProperty(MACHINE_TYPES).getValue());
+        launchTemplateParameters.setEnvironment(runtimeEnvironment);
+
+        String jobName = context.getProperty(JOB_NAME)
+                .evaluateAttributeExpressions(flowFile)
+                .getValue();
+        launchTemplateParameters.setJobName(jobName);
+
+
         Map<String, String> parameters = new HashMap<>();
         for (final Map.Entry<PropertyDescriptor, String> entry : context.getProperties().entrySet()) {
             if (entry.getKey().isDynamic()) {
@@ -204,15 +251,6 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
                 parameters.put(entry.getKey().getName(), value);
             }
         }
-
-        LaunchTemplateParameters launchTemplateParameters = new LaunchTemplateParameters();
-
-        String jobName = context.getProperty(JOB_NAME)
-                .evaluateAttributeExpressions(flowFile)
-                .getValue();
-
-        launchTemplateParameters.setJobName(jobName);
-
         launchTemplateParameters.setParameters(parameters);
 
         String projectId = context.getProperty(PROJECT_ID)
@@ -225,7 +263,6 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
                 .locations()
                 .templates()
                 .launch(projectId, context.getProperty(LOCATION).getValue(), launchTemplateParameters);
-
 
         String gcpPath = context.getProperty(GCS_PATH)
                 .evaluateAttributeExpressions(flowFile)
@@ -387,6 +424,12 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
                         + response.getCurrentStateTime()
                         + " to perform the job");
                 getLogger().info("The job with id " + id + " has been done!");
+
+                flowFile = session.removeAllAttributes(
+                        flowFile,
+                        new HashSet(Arrays.asList(JOB_ID_ATTR, JOB_STATE_ATTR))
+                );
+
                 session.transfer(flowFile, REL_SUCCESS);
                 break;
             }
