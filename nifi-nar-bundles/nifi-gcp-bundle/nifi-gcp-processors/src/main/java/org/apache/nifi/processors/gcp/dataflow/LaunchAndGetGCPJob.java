@@ -1,6 +1,8 @@
 package org.apache.nifi.processors.gcp.dataflow;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.services.dataflow.Dataflow;
 import com.google.api.services.dataflow.model.Job;
 import com.google.api.services.dataflow.model.LaunchTemplateParameters;
@@ -30,7 +32,8 @@ import java.util.*;
         @WritesAttribute(attribute = "filename", description = "The filename is set to the id of a job"),
         @WritesAttribute(attribute = "projectId", description = "The id of the project"),
         @WritesAttribute(attribute = "jobId", description = "The id of the job"),
-        @WritesAttribute(attribute = "output", description = "The job's output directory")
+        @WritesAttribute(attribute = "output", description = "The job's output directory"),
+        @WritesAttribute(attribute = "failOnStage", description = "Name of the stage where the process has failed")
 })
 
 @DynamicProperty(name = "The name of a User-Defined Parameters to be sent to job",
@@ -131,6 +134,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final String JOB_NAME_ATTR = "job.name";
     private static final String JOB_VALIDATE_ATTR = "job.validate";
     private static final String JOB_TEMPLATE_PATH_ATTR = "job.template.path";
+    private static final String FAIL_ON_STAGE_ATTR = "fail.on.stage";
 
 
     @Override
@@ -214,11 +218,67 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
                     examineJobs(context, session, dataflowService, flowFile);
                 } else {
                     getLogger().error("Flowfile has id job.id field but it is empty!");
+                    flowFile = setAttachmentForFailureOnInitialization(
+                            context,
+                            session,
+                            flowFile,
+                            "flowfile has id job.id field but it is empty!"
+                    );
+                    flowFile = session.penalize(flowFile);
                     session.transfer(flowFile, REL_FAILURE);
                 }
             }
+        } catch (final GoogleJsonResponseException e) {
+            getLogger().error("Failed to launch job due to ", e);
+            flowFile = setAttachmentForFailureOnInitialization(
+                    context, session, flowFile, e.getDetails().getMessage()
+            );
+            flowFile = session.penalize(flowFile);
+            session.transfer(flowFile, REL_FAILURE);
         } catch (final Exception e) {
             getLogger().error("Failed to launch job due to ", e);
+//            flowFile = session.append(flowFile, out -> out.write(
+//                    ("Process " + context.getName() + "reports error: \n " + e.getMessage()).getBytes()
+//            ));
+            flowFile = setAttachmentForFailureOnInitialization(context, session, flowFile, e.getMessage());
+            flowFile = session.penalize(flowFile);
+            session.transfer(flowFile, REL_FAILURE);
+        }
+    }
+
+    private FlowFile setAttachmentForFailureOnInitialization(
+            ProcessContext context,
+            ProcessSession session,
+            FlowFile flowFile,
+            String messageStr) {
+        String message = prepareJobInitializationErrorMessage(
+                context,
+                messageStr
+        );
+        return session.putAllAttributes(
+                flowFile,
+                new HashMap<String, String>() {
+                    {
+                        put(FAIL_ON_STAGE_ATTR, "initialization");
+                        put("attachments", message);
+                    }
+                }
+        );
+    }
+
+    private String prepareJobInitializationErrorMessage(ProcessContext context, String messageStr) {
+        Message message = new Message();
+        message.setFallback("Process with name " + context.getName() + " brought a trouble!");
+        message.setPretext(":exclamation: Process in trouble");
+        message.setTitle("Process with name " + context.getName() + " brought a trouble!");
+        List<Field> fields = new ArrayList<>();
+        fields.add(new Field("message:", messageStr));
+        message.setFields(fields);
+        message.setColor(MessageColor.DANGER.color);
+        try {
+            return (new ObjectMapper()).writeValueAsString(message);
+        } catch (JsonProcessingException e) {
+            return "Can't generate an error message! Go to NiFi";
         }
     }
 
@@ -439,6 +499,11 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
                 notifyJobState(session, state, flowFile);
                 buildFlowFile(context, session, flowFile, id);
                 getLogger().info("The job with id {} unsuccessfully terminated with the state {}!", new Object[]{id, state});
+                flowFile = session.putAttribute(flowFile, FAIL_ON_STAGE_ATTR, "run");
+                flowFile = session.removeAllAttributes(
+                        flowFile,
+                        new HashSet(Arrays.asList(JOB_ID_ATTR, JOB_STATE_ATTR))
+                );
                 session.transfer(flowFile, REL_FAILURE);
                 break;
             }
@@ -450,6 +515,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
             default:
                 notifyJobState(session, state, flowFile);
                 getLogger().error("The job with id {} is in unworkable {} state!", new Object[]{id, state});
+                flowFile = session.putAttribute(flowFile, FAIL_ON_STAGE_ATTR, "run");
                 session.transfer(flowFile, REL_FAILURE);
         }
     }
