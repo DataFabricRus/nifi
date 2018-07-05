@@ -26,27 +26,24 @@ import java.io.OutputStream;
 import java.util.*;
 
 
-@Tags({"google", "google cloud", "dataflow", "put"})
-@CapabilityDescription("Creates dataflow job from a template.")
+@Tags({"google", "google cloud platform", "dataflow", "put"})
+@CapabilityDescription("Launches GCP Dataflow job based on the specified template and monitors its execution. The standard use case assumes: 1) connection of 'inprocess' relation with the processor itself. Flowfiles on this relation are used to re-ask GCP Dataflow service about the job state; 2) connect 'notify' relation with a processor that can re-send notification to some external system, e.g. to PutSlack processor.")
 @WritesAttributes({
-        @WritesAttribute(attribute = "filename", description = "The filename is set to the id of a job"),
-        @WritesAttribute(attribute = "projectId", description = "The id of the project"),
-        @WritesAttribute(attribute = "jobId", description = "The id of the job"),
-        @WritesAttribute(attribute = "output", description = "The job's output directory"),
-        @WritesAttribute(attribute = "failOnStage", description = "Name of the stage where the process has failed")
+        @WritesAttribute(attribute = "job.id", description = "Id of the job assigned by GCP Dataflow service. The attribute is set only for flowfiles emitted from 'inprocess' relation. Presence of this attribute will make the processor to ask GCP Dataflow service about the job with this id."),
+        @WritesAttribute(attribute = "job.state", description = "The state of the job as reported by GCP Dataflow service. The attribute is set only for flowfiles emitted from 'inprocess' relation."),
+        @WritesAttribute(attribute = "job.name", description = "Name of the job as it has been set by the user. The attribute is set only for flowfiles emitted from 'inprocess' relation.")
 })
 
 @DynamicProperty(name = "The name of a User-Defined Parameters to be sent to the job",
         value = "The value of a User-Defined parameter to be set to the job",
-        description = "Allows User-Defined parameter to be sent to the job as a key/value pair",
+        description = "Allows User-Defined parameter to be sent to the job as a key/value pair. To make job template program written in Apache Beam primitives to accept those parameters it is necessary to declare them in pipeline options and use ValueProvider construct to read them inside pipeline code.",
         supportsExpressionLanguage = true)
-public class LaunchAndGetGCPJob extends AbstractProcessor {
-    //TODO: think about the name. It it can be called an Ingress Processor then possibly it would be better to start name from Listen. E.g. ListenGCDJobREST
+public class ExecuteGCPDataflowJob extends AbstractProcessor {
 
     public static final PropertyDescriptor DATAFLOW_SERVICE = new PropertyDescriptor.Builder()
             .name("dataflow-service-provider")
-            .displayName("Dataflow Service Provider")
-            .description("The Controller Service that is used to provide dataflow service")
+            .displayName("GCP Dataflow Service Provider")
+            .description("The Controller Service that is used to provide GCP Dataflow service.")
             .required(true)
             .identifiesControllerService(GCPDataflowService.class)
             .build();
@@ -54,7 +51,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final PropertyDescriptor PROJECT_ID = new PropertyDescriptor
             .Builder().name("gcp-project-id")
             .displayName("Project ID")
-            .description("Google Cloud Project ID")
+            .description("Google Cloud Project ID.")
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
@@ -63,7 +60,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final PropertyDescriptor JOB_NAME = new PropertyDescriptor
             .Builder().name("job-name")
             .displayName("Job name")
-            .description("Name of the created job")
+            .description("Name of the job to be created.")
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
@@ -72,7 +69,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final PropertyDescriptor GCS_PATH = new PropertyDescriptor
             .Builder().name("gcs-path")
             .displayName("GCS path")
-            .description("Google Cloud Storage path to the job template")
+            .description("Google Cloud Storage path to the template of the job.")
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
@@ -81,7 +78,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final PropertyDescriptor VALIDATE_ONLY = new PropertyDescriptor
             .Builder().name("validate-only")
             .displayName("Validate only attribute")
-            .description("If true, the request is validated but not actually executed. Default is true")
+            .description("If true, the request is validated but not actually executed. Default is true.")
             .required(true)
             .allowableValues("true", "false")
             .defaultValue("true")
@@ -90,7 +87,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final PropertyDescriptor LOCATION = new PropertyDescriptor
             .Builder().name("location")
             .displayName("Job location")
-            .description("Enables to specify where it is necessary to place the job")
+            .description("Enables to specify where it is necessary to place the job.")
             .required(true)
             .allowableValues("europe-west1", "us-central1", "us-west1")
             .defaultValue("europe-west1")
@@ -99,7 +96,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final PropertyDescriptor MACHINE_TYPES = new PropertyDescriptor
             .Builder().name("machine-type")
             .displayName("Machine type")
-            .description("Enables to specify type of the machine to run the job")
+            .description("Enables to specify type of the machine to run the job. By default 'n1-standard-1' is used.")
             .required(true)
             .allowableValues
                     (
@@ -146,11 +143,11 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
     public static final String JOB_STATE_PENDING = "JOB_STATE_PENDING";
     public static final String JOB_STATE_CANCELLING = "JOB_STATE_CANCELLING";
 
-    //standard GCP Dataflow are extended with these states states to signal about job launching and its failure
+    //standard GCP Dataflow job states are extended with these states to signal about job launching and its failure
     public static final String JOB_STATE_ON_START = "JOB_STATE_ON_START";
     public static final String JOB_STATE_LAUNCH_FAILED = "JOB_STATE_LAUNCH_FAILED";
 
-    //some standard message fields, there may be some arbitrary one that are taken from dynamic properties
+    //some standard message fields, there may be some arbitrary ones that are taken from dynamic properties
     public static final String JOB_NAME_NF_FIELD = "job name";
     public static final String JOB_ID_NF_FIELD = "job id";
     public static final String JOB_TEMPLATE_PATH_NF_FIELD = "template path";
@@ -183,22 +180,22 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
 
     public static final Relationship REL_SUCCESS =
             new Relationship.Builder().name("success")
-                    .description("FlowFiles are routed to this relationship after a successful Google Cloud Dataflow launch operation.")
+                    .description("FlowFiles are routed to this relationship after GCP Dataflow service has reported that the job was successfully done.")
                     .build();
 
     public static final Relationship REL_FAILURE =
             new Relationship.Builder().name("failure")
-                    .description("FlowFiles are routed to this relationship after a failure on Google Cloud Dataflow launch operation.")
+                    .description("FlowFiles are routed to this relationship after GCP Dataflow service has reported that the job was failed, cancelled or got an unknown state, or because of an internal error within the processor.")
                     .build();
 
     public static final Relationship REL_INPROCESS =
             new Relationship.Builder().name("inprocess")
-                    .description("FlowFiles with job id.")
+                    .description("Received flow files are 'circulating' within this relation until the moment the job is done or failed.")
                     .build();
 
     public static final Relationship REL_NOTIFY =
             new Relationship.Builder().name("notify")
-                    .description("FlowFiles with job status information are routed to this relationship while Google Cloud Dataflow launch operation.")
+                    .description("For this relation new flowfiles are generated. They contain information that can be used for notification about the job state.")
                     .build();
 
     public static Set<Relationship> relationships;
@@ -385,6 +382,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
             default:
                 getLogger().error("The job with id {} is in unworkable {} state!", new Object[]{id, state});
                 emitNotification(session, jobStateNotification(state, flowFile));
+                flowFile = removeObsoleteAttributes(session, flowFile);
                 session.transfer(flowFile, REL_FAILURE);
         }
     }
@@ -434,6 +432,7 @@ public class LaunchAndGetGCPJob extends AbstractProcessor {
             String errorMessage
     ) {
         emitNotification(session, jobLaunchFailedNotification(context, errorMessage));
+        removeObsoleteAttributes(session, flowFile);
         flowFile = session.penalize(flowFile);
         session.transfer(flowFile, REL_FAILURE);
     }

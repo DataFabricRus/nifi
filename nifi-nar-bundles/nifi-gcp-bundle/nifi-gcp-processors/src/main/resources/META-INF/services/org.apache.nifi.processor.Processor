@@ -18,4 +18,4 @@ org.apache.nifi.processors.gcp.storage.DeleteGCSObject
 org.apache.nifi.processors.gcp.storage.ListGCSBucket
 org.apache.nifi.processors.gcp.pubsub.PublishGCPubSub
 org.apache.nifi.processors.gcp.pubsub.ConsumeGCPubSub
-org.apache.nifi.processors.gcp.dataflow.LaunchAndGetGCPJob
+org.apache.nifi.processors.gcp.dataflow.ExecuteGCPDataflowJob
